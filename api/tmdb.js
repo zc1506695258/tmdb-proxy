@@ -3,8 +3,10 @@ const TMDB_BASE_URL = 'https://api.themoviedb.org';
 
 // 创建缓存对象
 const cache = new Map();
-// 缓存过期时间（5分钟）
-const CACHE_DURATION = 5 * 60 * 1000;
+// 缓存过期时间（10分钟）
+const CACHE_DURATION = 10 * 60 * 1000;
+// 最大缓存条目数
+const MAX_CACHE_SIZE = 1000;
 
 // 缓存清理函数
 function cleanExpiredCache() {
@@ -16,14 +18,29 @@ function cleanExpiredCache() {
     }
 }
 
-// 定期清理缓存（每5分钟）
+// 检查缓存大小并清理最旧的条目
+function checkCacheSize() {
+    if (cache.size > MAX_CACHE_SIZE) {
+        // 将缓存条目转换为数组并按过期时间排序
+        const entries = Array.from(cache.entries());
+        entries.sort((a, b) => a[1].expiry - b[1].expiry);
+
+        // 删除最旧的条目，直到缓存大小达到限制
+        const deleteCount = cache.size - MAX_CACHE_SIZE;
+        entries.slice(0, deleteCount).forEach(([key]) => cache.delete(key));
+
+        console.log(`Cleaned ${deleteCount} old cache entries`);
+    }
+}
+
+// 定期清理缓存（每10分钟）
 setInterval(cleanExpiredCache, CACHE_DURATION);
 
 module.exports = async (req, res) => {
     // 设置 CORS 头
-    res.setHeader('Access-Control-Allow-Origin', '*');  // 允许所有域名访问
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');  // 允许的HTTP方法
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');  // 允许的请求头
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     // 处理 OPTIONS 请求
     if (req.method === 'OPTIONS') {
@@ -35,8 +52,8 @@ module.exports = async (req, res) => {
         const fullPath = req.url;
         const authHeader = req.headers.authorization;
 
-        // 获取缓存键（包含认证信息，确保不同认证有不同缓存）
-        const cacheKey = `${fullPath}-${authHeader || ''}`;
+        // 缓存键只使用请求路径
+        const cacheKey = fullPath;
 
         // 检查缓存
         if (cache.has(cacheKey)) {
@@ -67,6 +84,9 @@ module.exports = async (req, res) => {
 
         // 只有响应状态码为 200 时才缓存
         if (response.status === 200) {
+            // 在添加新缓存前检查缓存大小
+            checkCacheSize();
+
             cache.set(cacheKey, {
                 data: response.data,
                 expiry: Date.now() + CACHE_DURATION
